@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { contactSchema } from '@/lib/contact';
-import { getMailConfiguration, sendContactEmail } from '@/lib/mail';
-import { createHash } from 'node:crypto';
+import { getMailConfiguration, sendContactEmail, sendContactAcknowledgement } from '@/lib/mail';
+import { createHash, randomUUID } from 'node:crypto';
+import { verifyContactChallenge } from '@/lib/turnstile';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+function audit(requestId: string, event: string, provider?: string) {
+  // Only operational metadata. No IP, message, recipient, token, credentials or SMTP response.
+  console.info(JSON.stringify({ timestamp: new Date().toISOString(), requestId, event, provider }));
+}
 const windows = new Map<string, { count: number; expires: number }>();
 const MAX_BYTES = 24_000;
 
@@ -18,6 +25,7 @@ function fail(message: string, status: number, extras = {}) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = randomUUID();
   const origin = request.headers.get('origin');
   let allowedOrigin = false;
   try {
@@ -34,7 +42,7 @@ export async function POST(request: NextRequest) {
     return fail('Format de demande non accepté.', 415);
   // Trust this header only behind a proxy that overwrites it. Without one, use a shared bucket.
   const ip =
-    process.env.TRUST_PROXY === 'true'
+    process.env.VERCEL === '1' || process.env.TRUST_PROXY === 'true'
       ? (request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'shared')
       : 'shared';
   const key = createHash('sha256').update(ip).digest('hex');
@@ -79,21 +87,49 @@ export async function POST(request: NextRequest) {
       'La demande n’a pas pu être envoyée. Veuillez réessayer sans préremplissage automatique.',
       400,
     );
+  const challenge = await verifyContactChallenge(
+    result.data.turnstileToken,
+    new URL(origin!).hostname,
+  );
+  if (challenge === 'misconfigured' || challenge === 'unavailable') {
+    audit(requestId, `challenge_${challenge}`);
+    return fail('La vérification anti-spam est indisponible. Veuillez réessayer.', 503);
+  }
+  if (challenge === 'rejected') return fail('Veuillez renouveler la vérification anti-spam.', 400);
+  const autoReply = process.env.CONTACT_AUTOREPLY_ENABLED === 'true';
+  // Avoid making an unprotected public endpoint into an automatic mail reflector.
+  if (autoReply && challenge !== 'verified') {
+    audit(requestId, 'autoreply_requires_challenge');
+    return fail('Le service de contact est temporairement indisponible.', 503);
+  }
   const config = getMailConfiguration();
   if (!config)
     return fail('L’envoi par e-mail n’est pas encore activé. Aucun message n’a été transmis.', 503);
   try {
     await sendContactEmail(result.data, config);
-    return NextResponse.json(
-      { message: 'Votre demande a été envoyée.' },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
   } catch {
-    // Never log form data, credentials or the provider response.
-    console.error('Échec du fournisseur de messagerie.');
-    return fail(
-      'Votre message n’a pas pu être envoyé. Réessayez ou utilisez un autre moyen de contact disponible.',
-      502,
-    );
+    audit(requestId, 'primary_failed', config.provider);
+    return fail("Une erreur est survenue lors de l'envoi. Veuillez réessayer.", 502);
   }
+  audit(requestId, 'primary_accepted', config.provider);
+  let acknowledgement: 'sent' | 'failed' | 'disabled' = 'disabled';
+  if (autoReply) {
+    try {
+      await sendContactAcknowledgement(result.data, config);
+      acknowledgement = 'sent';
+      audit(requestId, 'acknowledgement_accepted', config.provider);
+    } catch {
+      // The primary request already succeeded. Never invite the visitor to submit it again.
+      acknowledgement = 'failed';
+      audit(requestId, 'acknowledgement_failed', config.provider);
+    }
+  }
+  return NextResponse.json(
+    {
+      message: 'Votre message a bien été envoyé. Nous vous répondrons dans les meilleurs délais.',
+      acknowledgement,
+      requestId,
+    },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }
