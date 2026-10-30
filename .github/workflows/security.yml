@@ -1,0 +1,24 @@
+name: Protection des secrets
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-secrets:
+    name: Vérifier les fichiers de configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refuser les secrets dans les exemples et les fichiers privés
+        run: node scripts/check-secrets.mjs
+      - name: Tester le contrôle de sécurité
+        run: node --test tests/security.test.mjs

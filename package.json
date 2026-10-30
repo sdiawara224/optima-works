@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "playwright test",
     "format": "prettier --write .",
-    "typecheck:cms": "tsc -p cms/tsconfig.json"
+    "typecheck:cms": "tsc -p cms/tsconfig.json",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "prebuild": "npm run check:secrets"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
