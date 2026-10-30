@@ -15,6 +15,7 @@ npm run dev
 Ouvrir le port 3000. Le serveur écoute sur `0.0.0.0` et accepte les domaines de prévisualisation Arena. Toutes les requêtes du navigateur sont relatives au site. Les polices sont locales.
 
 ```bash
+npm run check:secrets
 npm run typecheck
 npm test
 npm run build
@@ -67,3 +68,7 @@ npm run format
 - [Recette et limites connues](docs/RECETTE.md)
 
 **Avant diffusion publique : faire valider la maquette, la déclinaison du logo, les textes, la FAQ, les coordonnées, les mentions et le choix des services par OptimaWorks.**
+
+## Protection des secrets
+
+Les champs secrets des fichiers `.env.example` doivent rester vides. Le contrôle `npm run check:secrets` est exécuté avant le build et dans GitHub Actions. Il ne révoque pas un mot de passe déjà exposé et ne nettoie pas l’historique. Voir le [guide de sécurité et de révocation](docs/SECURITE.md).
