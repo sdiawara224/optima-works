@@ -28,7 +28,8 @@ export const contactSchema = z.object({
     .string()
     .trim()
     .min(3, 'Précisez un objet (3 caractères minimum).')
-    .max(150, '150 caractères maximum.'),
+    .max(150, '150 caractères maximum.')
+    .regex(/^[^\r\n\u0000-\u001f\u007f]*$/, 'L’objet doit tenir sur une ligne.'),
   message: z
     .string()
     .trim()
@@ -38,6 +39,7 @@ export const contactSchema = z.object({
     error: 'Veuillez prendre connaissance de la politique de confidentialité.',
   }),
   website: z.string().max(200).optional().default(''),
+  turnstileToken: z.string().max(2048).optional().default(''),
 });
 export type ContactData = z.infer<typeof contactSchema>;
 

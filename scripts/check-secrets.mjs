@@ -4,7 +4,8 @@ import { pathToFileURL } from 'node:url';
 
 // Focused regression guard, not a substitute for revoking exposed credentials
 // or a complete history-aware secret scanner. Never print matched values.
-const sensitiveName = /(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|CLIENT_SECRET)$/i;
+const sensitiveName =
+  /(?:PASSWORD|PASSWD|SECRET|SECRET_KEY|TOKEN|API_KEY|PRIVATE_KEY|CLIENT_SECRET)$/i;
 const knownCredentials = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\bgh[pousr]_[A-Za-z0-9]{36,}\b/,
