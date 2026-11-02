@@ -339,3 +339,203 @@ test('Vercel utilise son en-tête IP même si TRUST_PROXY est désactivé', asyn
     process.env.TRUST_PROXY = 'true';
   }
 });
+
+function multipartRequest(form: FormData, extra: Record<string, string> = {}) {
+  return new NextRequest('http://localhost:3000/api/contact', {
+    method: 'POST',
+    headers: {
+      origin: 'http://localhost:3000',
+      host: 'localhost:3000',
+      'x-forwarded-for': `192.0.2.${ip++}`,
+      ...extra,
+    },
+    body: form,
+  });
+}
+function contactMultipart(data: Record<string, unknown> = valid) {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(data)) form.append(name, String(value));
+  return form;
+}
+
+test('collecte tous les champs et transmet le fichier au compte officiel uniquement', async () => {
+  configureGmail();
+  const data = { ...valid, company: 'Entreprise de test', phone: '+224 600 00 00 00' };
+  const form = contactMultipart(data);
+  const content = 'Description du projet jointe au formulaire.';
+  form.append('descriptionFile', new File([content], 'description.txt', { type: 'text/plain' }));
+  let sends = 0;
+  const transport = mock.method(
+    nodemailer,
+    'createTransport',
+    () =>
+      ({
+        sendMail: async (mail: {
+          to: string;
+          replyTo: string;
+          text: string;
+          html: string;
+          attachments: {
+            content: Buffer;
+            filename: string;
+            contentType: string;
+            contentDisposition: string;
+          }[];
+        }) => {
+          sends++;
+          assert.equal(mail.to, 'optimaworksgn@gmail.com');
+          assert.equal(mail.replyTo, data.email);
+          for (const value of Object.values(data).filter((v): v is string => typeof v === 'string'))
+            assert.ok(mail.text.includes(value));
+          assert.ok(mail.html.includes(data.company));
+          assert.ok(mail.html.includes(data.phone));
+          assert.equal(mail.attachments.length, 1);
+          assert.equal(mail.attachments[0].content.toString(), content);
+          assert.equal(mail.attachments[0].contentType, 'text/plain');
+          assert.equal(mail.attachments[0].contentDisposition, 'attachment');
+          return { accepted: [mail.to], rejected: [], response: '250 OK' };
+        },
+        close() {},
+      }) as unknown as ReturnType<typeof nodemailer.createTransport>,
+  );
+  try {
+    assert.equal((await POST(multipartRequest(form))).status, 200);
+    assert.equal(sends, 1);
+  } finally {
+    transport.mock.restore();
+  }
+});
+
+test('multipart sans pièce jointe conserve le fonctionnement du formulaire', async () => {
+  configureGmail();
+  const transport = mock.method(
+    nodemailer,
+    'createTransport',
+    () =>
+      ({
+        sendMail: async (mail: { to: string; attachments?: unknown }) => {
+          assert.equal(mail.attachments, undefined);
+          return { accepted: [mail.to], rejected: [], response: '250 OK' };
+        },
+        close() {},
+      }) as unknown as ReturnType<typeof nodemailer.createTransport>,
+  );
+  try {
+    assert.equal((await POST(multipartRequest(contactMultipart()))).status, 200);
+  } finally {
+    transport.mock.restore();
+  }
+});
+
+test('pièces jointes invalides ou multiples : aucun appel SMTP', async () => {
+  configureGmail();
+  const transport = mock.method(nodemailer, 'createTransport');
+  const forms = [
+    () => {
+      const f = contactMultipart();
+      f.append(
+        'descriptionFile',
+        new File(['bad'], 'description.pdf', { type: 'application/pdf' }),
+      );
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      f.append('descriptionFile', new File(['x'.repeat(2 * 1024 * 1024 + 1)], 'description.txt'));
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      for (let i = 0; i < 2; i++)
+        f.append('descriptionFile', new File(['text'], 'description.txt'));
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      f.append('descriptionFile', 'https://example.com/private.pdf');
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      f.append('company', new File(['text'], 'description.txt'));
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      f.append('email', 'another@example.com');
+      return f;
+    },
+    () => {
+      const f = contactMultipart();
+      f.append('to', 'another@example.com');
+      return f;
+    },
+    () => contactMultipart({ ...valid, email: 'adresse_invalide@gmail.com' }),
+  ];
+  try {
+    for (const makeForm of forms)
+      assert.equal((await POST(multipartRequest(makeForm()))).status, 400);
+    assert.equal(transport.mock.callCount(), 0);
+  } finally {
+    transport.mock.restore();
+  }
+});
+
+test('limite la taille multipart par lecture du flux même sans Content-Length', async () => {
+  const form = contactMultipart();
+  form.append(
+    'descriptionFile',
+    new File(['x'.repeat(2 * 1024 * 1024 + 64_000)], 'description.txt'),
+  );
+  const req = multipartRequest(form);
+  assert.equal(req.headers.has('content-length'), false);
+  assert.equal((await POST(req)).status, 413);
+  const largeText = contactMultipart({ ...valid, message: 'a'.repeat(24_001) });
+  assert.equal((await POST(multipartRequest(largeText))).status, 413);
+});
+
+test('n’envoie jamais la pièce jointe dans l’accusé et ne journalise pas son contenu', async () => {
+  configureGmail(true);
+  process.env.TURNSTILE_SECRET_KEY = 'test-only';
+  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'test-site-key';
+  const form = contactMultipart({ ...valid, turnstileToken: 'test-token' });
+  form.append(
+    'descriptionFile',
+    new File(['confidential attachment body'], 'document-confidentiel.txt'),
+  );
+  const verification = mock.method(global, 'fetch', async () =>
+    Response.json({ success: true, action: 'contact', hostname: 'localhost' }),
+  );
+  const logs: string[] = [];
+  const log = mock.method(console, 'info', (line: string) => {
+    logs.push(line);
+  });
+  let sends = 0;
+  const transport = mock.method(
+    nodemailer,
+    'createTransport',
+    () =>
+      ({
+        sendMail: async (mail: { to: string; attachments?: unknown[] }) => {
+          sends++;
+          if (sends === 1) assert.equal(mail.attachments?.length, 1);
+          else assert.equal(mail.attachments, undefined);
+          return { accepted: [mail.to], rejected: [], response: '250 OK' };
+        },
+        close() {},
+      }) as unknown as ReturnType<typeof nodemailer.createTransport>,
+  );
+  try {
+    const response = await POST(multipartRequest(form));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).acknowledgement, 'sent');
+    assert.equal(sends, 2);
+    assert.ok(!logs.join('').includes('confidential attachment body'));
+    assert.ok(!logs.join('').includes('document-confidentiel'));
+  } finally {
+    transport.mock.restore();
+    verification.mock.restore();
+    log.mock.restore();
+    configureGmail();
+  }
+});

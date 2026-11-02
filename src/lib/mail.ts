@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { z } from 'zod';
 import { type ContactData, emailText } from './contact';
 import { OFFICIAL_CONTACT_EMAIL } from './site-config';
+import type { ContactAttachment } from './contact-attachment';
 
 export type MailConfiguration =
   | { provider: 'gmail'; user: string; password: string; to: string }
@@ -85,7 +86,14 @@ Merci pour votre confiance.
 
 L'équipe OptimaWorks`;
 
-type Message = { to: string; replyTo: string; subject: string; text: string; html: string };
+type Message = {
+  to: string;
+  replyTo: string;
+  subject: string;
+  text: string;
+  html: string;
+  attachments?: ContactAttachment[];
+};
 
 async function deliver(config: MailConfiguration, message: Message): Promise<void> {
   if (config.provider === 'gmail') {
@@ -137,6 +145,15 @@ async function deliver(config: MailConfiguration, message: Message): Promise<voi
       subject: message.subject,
       text: message.text,
       html: message.html,
+      ...(message.attachments?.length
+        ? {
+            attachments: message.attachments.map((file) => ({
+              filename: file.filename,
+              content: file.content.toString('base64'),
+              content_type: file.contentType,
+            })),
+          }
+        : {}),
     }),
   });
   if (!response.ok) throw new Error('Delivery provider rejected request');
@@ -147,6 +164,7 @@ async function deliver(config: MailConfiguration, message: Message): Promise<voi
 export async function sendContactEmail(
   data: ContactData,
   config: MailConfiguration,
+  attachment?: ContactAttachment,
 ): Promise<void> {
   await deliver(config, {
     to: config.to,
@@ -154,6 +172,7 @@ export async function sendContactEmail(
     subject: 'Nouvelle demande de contact – OptimaWorks',
     text: emailText(data),
     html: contactEmailHtml(data),
+    ...(attachment ? { attachments: [attachment] } : {}),
   });
 }
 

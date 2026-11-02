@@ -66,3 +66,25 @@ test('refuse un jeton anti-spam démesuré', () => {
     false,
   );
 });
+
+test('valide les règles Gmail sans imposer Gmail aux adresses professionnelles', () => {
+  for (const email of [
+    'prenom.nom@gmail.com',
+    'prenom.nom+devis@gmail.com',
+    'PRENOM.NOM@GMAIL.COM',
+    'prenom_nom@entreprise.com',
+  ])
+    assert.equal(contactSchema.safeParse({ ...valid, email }).success, true, email);
+  for (const email of [
+    'prenom_nom@gmail.com',
+    'prenom-nom@googlemail.com',
+    'prenom..nom@gmail.com',
+    'prenom.nom@gmai',
+    'prenom.nom@gmail.com\r\nBcc:test@example.com',
+  ])
+    assert.equal(contactSchema.safeParse({ ...valid, email }).success, false, email);
+  assert.equal(
+    contactSchema.parse({ ...valid, email: ' prenom.nom@GMAIL.COM ' }).email,
+    'prenom.nom@gmail.com',
+  );
+});

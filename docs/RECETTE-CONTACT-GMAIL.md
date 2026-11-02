@@ -1,6 +1,6 @@
 # Rapport de recette — contact Gmail SMTP
 
-Date : **30 octobre 2026**. Branche de travail : `arena/6086771e-optima-works`.
+Rapport initial : **30 octobre 2026**. La mise à jour pièces jointes du **2 novembre 2026** est détaillée dans [RECETTE-CONTACT-FICHIERS.md](RECETTE-CONTACT-FICHIERS.md). Branche de travail : `arena/6086771e-optima-works`.
 
 ## Conclusion
 

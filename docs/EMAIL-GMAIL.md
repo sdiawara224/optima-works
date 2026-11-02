@@ -93,8 +93,8 @@ TLS 465 avec contrôle du certificat, TLS ≥1.2, limites de connexion et délai
 
 ## 5. Sécurité, limites et suivi
 
-- Méthode applicative POST uniquement ; GET/PUT refusées par Next.js, JSON requis, origine contrôlée.
-- Limite de corps 24 000 octets appliquée aussi en lecture du flux, même sans `Content-Length` fiable.
+- Méthode applicative POST uniquement ; GET/PUT refusées par Next.js, JSON sans fichier ou multipart avec pièce jointe, origine contrôlée.
+- Sans pièce jointe : limite JSON de 24 000 octets. Avec pièce jointe : corps multipart limité à 2 161 152 octets (2 Mio + 64 000 octets d’enveloppe), dont 24 000 octets maximum de valeurs texte et un seul fichier de 2 Mio maximum. Limites appliquées pendant la lecture du flux, même sans `Content-Length` fiable.
 - Honeypot rempli : refus sans envoi ni faux succès. Aucun détail d’erreur SMTP n’est retourné.
 - Au plus 5 tentatives par tranche de 10 minutes et par IP **dans chaque instance serveur**. Sur Vercel, utilisation de l’en-tête IP réécrit par la plateforme. Hors Vercel, `TRUST_PROXY=true` seulement si le proxy de confiance écrase cet en-tête ; sinon quota partagé pour ne pas accepter les IP forgées.
 - **Le limiteur mémoire n’est pas distribué** et se réinitialise au redémarrage. Il ne garantit pas un quota global sur Vercel multi-instance. Turnstile ajoute une protection, mais pour un quota global strict, prévoir une règle pare-feu ou un stockage de compteurs distribué validé et chiffré séparément. Aucun service externe payant ou base de prospects ajouté.
@@ -120,3 +120,15 @@ Les résultats automatisés et les étapes non exécutées sont consignés dans 
 ## Retour arrière
 
 Avant lancement, conserver l’identifiant du précédent déploiement. En cas d’incident, restaurer cette révision dans Vercel, puis vérifier la compatibilité de sa configuration (`GMAIL_*` pour l’ancien code si nécessaire). `CONTACT_AUTOREPLY_ENABLED=false` désactive l’accusé après mise à jour des variables ; redéployer pour une configuration cohérente. En cas de fuite, révoquer immédiatement le mot de passe Google et les clés concernées, puis générer de nouveaux secrets privés. Un rollback de code ne révoque aucun secret.
+
+## 7. Fichier de description (mise à jour du 2 novembre 2026)
+
+Le formulaire propose un **fichier facultatif PDF ou TXT UTF-8, de 2 Mo maximum** (2 097 152 octets). Il est joint uniquement au message principal envoyé à `optimaworksgn@gmail.com`, avec tous les champs du formulaire ; jamais à l’accusé de réception. Le texte du besoin reste obligatoire. Les documents Word, archives, images et exécutables ne sont pas acceptés dans cette version. Exporter en PDF ou TXT si nécessaire.
+
+Les contrôles navigateur sont doublés côté serveur : un seul fichier, nom simple à une seule extension, longueur et taille limitées, MIME cohérent, signature/enveloppe PDF ou texte UTF-8 sans octets binaires. Le nom est nettoyé avant création des en-têtes MIME. Ce contrôle de format n’est **pas un antivirus** ni une validation complète de la structure PDF : ne pas ouvrir de pièce jointe inconnue sans les précautions habituelles.
+
+Le fichier est traité en mémoire, sans chemin/URL fourni par le visiteur, sans écriture sur disque et sans stockage public ou base dédiée. Il n’est ni lu comme instruction, ni exécuté. Son contenu et son nom ne sont pas journalisés. Une fois envoyé, il reste dans la boîte mail : prévoir sa conservation/suppression dans la politique de confidentialité.
+
+L’adresse du visiteur est validée côté client et serveur, avec contrôles supplémentaires des caractères du nom Gmail et préservation des alias `+tag`. Le domaine est normalisé en minuscules sans correction silencieuse des fautes ni suppression des points/tags. Les adresses professionnelles hors Gmail restent acceptées. **Cela ne prouve pas que la boîte existe ou appartient au visiteur** ; aucune vérification de propriété/OTP ou interrogation d’une boîte Gmail n’est ajoutée.
+
+Recette complémentaire : joindre un PDF réel ou un TXT de test, confirmer la réception du message et du document, vérifier l’intégrité des octets et tous les champs, puis tester le refus d’un fichier interdit/trop volumineux. Voir le [rapport de cette évolution](RECETTE-CONTACT-FICHIERS.md).

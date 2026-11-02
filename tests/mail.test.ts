@@ -135,3 +135,48 @@ test('le délai SMTP total ferme le transport et refuse le faux succès', async 
     context.mock.timers.reset();
   }
 });
+
+test('l’alternative Resend conserve la pièce jointe encodée sans chemin ou URL', async () => {
+  const data = contactSchema.parse({
+    name: 'Mamadou Diallo',
+    email: 'test@example.com',
+    service: 'Graphisme & Design',
+    subject: 'Test fichier',
+    message: 'Un message suffisamment long pour ce test.',
+    consent: true,
+  });
+  const content = Buffer.from('Description jointe au projet.');
+  const fetchStub = mock.method(global, 'fetch', async (url: unknown, init?: RequestInit) => {
+    assert.equal(url, 'https://api.resend.com/emails');
+    const sent = JSON.parse(init!.body as string);
+    assert.deepEqual(sent.attachments, [
+      {
+        filename: 'description.txt',
+        content: content.toString('base64'),
+        content_type: 'text/plain',
+      },
+    ]);
+    assert.deepEqual(sent.to, ['optimaworksgn@gmail.com']);
+    assert.equal(sent.reply_to, 'test@example.com');
+    return Response.json({ id: 'test-only-confirmation' });
+  });
+  try {
+    await sendContactEmail(
+      data,
+      {
+        provider: 'resend',
+        apiKey: 'test-only',
+        from: 'test@example.com',
+        to: 'optimaworksgn@gmail.com',
+      },
+      {
+        filename: 'description.txt',
+        content,
+        contentType: 'text/plain',
+        contentDisposition: 'attachment',
+      },
+    );
+  } finally {
+    fetchStub.mock.restore();
+  }
+});

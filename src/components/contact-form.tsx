@@ -5,6 +5,11 @@ import { ArrowUpRight, CheckCircle2, LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { contactSchema, serviceNames } from '@/lib/contact';
 import { ContactChallenge } from './contact-challenge';
+import {
+  descriptionFileError,
+  DESCRIPTION_FILE_ACCEPT,
+  DESCRIPTION_FILE_HINT,
+} from '@/lib/contact-file';
 
 export function ContactForm({
   enabled,
@@ -50,7 +55,8 @@ export function ContactForm({
       onSubmit={async (e) => {
         e.preventDefault();
         if (inFlight.current || state === 'success') return;
-        const data = Object.fromEntries(new FormData(e.currentTarget));
+        const submitted = new FormData(e.currentTarget);
+        const data = Object.fromEntries(submitted);
         const parsed = contactSchema.safeParse({
           ...data,
           consent: data.consent === 'on',
@@ -68,6 +74,19 @@ export function ContactForm({
           );
           return;
         }
+        const selectedFile = submitted.get('descriptionFile');
+        const attachment =
+          selectedFile instanceof File && selectedFile.name ? selectedFile : undefined;
+        const fileError = attachment ? descriptionFileError(attachment) : null;
+        if (fileError) {
+          setErrors({ descriptionFile: fileError });
+          setState('idle');
+          requestAnimationFrame(() =>
+            form.current?.querySelector<HTMLInputElement>('[name="descriptionFile"]')?.focus(),
+          );
+          return;
+        }
+        setErrors({});
         if (siteKey && !turnstileToken) {
           setState('error');
           setMessage('Veuillez compléter la vérification anti-spam avant l’envoi.');
@@ -79,10 +98,15 @@ export function ContactForm({
         setState('loading');
         let failureMessage = "Une erreur est survenue lors de l'envoi. Veuillez réessayer.";
         try {
+          const payload = new FormData();
+          for (const [name, value] of Object.entries(parsed.data))
+            payload.append(name, String(value));
+          if (attachment) payload.append('descriptionFile', attachment);
           const res = await fetch('/api/contact', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(parsed.data),
+            // Keep JSON compatibility without a file; the browser sets the multipart boundary when needed.
+            ...(attachment ? {} : { headers: { 'Content-Type': 'application/json' } }),
+            body: attachment ? payload : JSON.stringify(parsed.data),
           });
           const result = await res.json();
           if (!res.ok) {
@@ -204,6 +228,24 @@ export function ContactForm({
         />
         <span className="field-hint">Entre 20 et 5 000 caractères.</span>
         {error('message')}
+      </label>
+      <label>
+        Fichier de description
+        <input
+          name="descriptionFile"
+          type="file"
+          accept={DESCRIPTION_FILE_ACCEPT}
+          {...attrs('descriptionFile')}
+          aria-describedby={
+            errors.descriptionFile
+              ? 'description-file-hint error-descriptionFile'
+              : 'description-file-hint'
+          }
+        />
+        <span className="field-hint" id="description-file-hint">
+          {DESCRIPTION_FILE_HINT}
+        </span>
+        {error('descriptionFile')}
       </label>
       <div className="honeypot" aria-hidden="true">
         <label>
