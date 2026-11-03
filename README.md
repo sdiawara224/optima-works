@@ -40,28 +40,29 @@ npm run format
 ## Ce qui demande une configuration / validation
 
 - **CMS** : Studio séparé dans `cms/`, modèles et requêtes fournis. Aucun projet Sanity ni compte éditeur n’est connecté. Les contenus affichés sans configuration sont des propositions issues du brief, et non des contenus approuvés.
-- **E-mails** : envoi Gmail SMTP pris en charge avec `EMAIL_PROVIDER=gmail`, `GMAIL_USER`, `GMAIL_APP_PASSWORD` (mot de passe d’application privé) et `CONTACT_TO=optimaworksgn@gmail.com`. Voir le [guide Gmail](docs/EMAIL-GMAIL.md). Resend reste une alternative configurable. Sans identifiants, la route renvoie explicitement 503 : **aucun faux succès**. La livraison réelle reste à tester.
-- **Coordonnées** : l’e-mail officiel confirmé `optimaworksgn@gmail.com` est affiché dans Contact et le pied de page, avec un lien direct. Il est centralisé dans `src/lib/site-config.ts` et peut être remplacé par un e-mail publié dans le CMS. Le numéro, WhatsApp et les réseaux restent masqués sans confirmation. `.env.example` propose cette adresse pour `CONTACT_TO`, sans activer le service d’envoi.
+- **E-mails** : envoi Gmail SMTP via `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` (mot de passe d’application privé) et `CONTACT_EMAIL=optimaworksgn@gmail.com` ; anciens alias `GMAIL_*` conservés. E-mails HTML/texte, Reply-To visiteur, Turnstile configurable et accusé indépendant après validation du challenge. Voir le [guide Gmail](docs/EMAIL-GMAIL.md). Resend reste une alternative configurable. Sans identifiants, la route renvoie explicitement 503 : **aucun faux succès**. La livraison réelle reste à tester.
+- **Coordonnées** : l’e-mail officiel confirmé `optimaworksgn@gmail.com` est affiché dans Contact et le pied de page, avec un lien direct. Il est centralisé dans `src/lib/site-config.ts` et peut être remplacé par un e-mail publié dans le CMS. Le numéro, WhatsApp et les réseaux restent masqués sans confirmation. `.env.example` propose cette adresse pour `CONTACT_EMAIL`, sans activer le service d’envoi.
 - **Identité** : le logo officiel fourni est intégré dans l’en-tête, le pied de page et l’image de partage ; les icônes du site utilisent son symbole. Les couleurs et proportions sont conservées, avec retrait des grandes marges. La dernière version fournie, sur fond blanc cassé, remplace la version sur fond vert.
 - **Juridique** : pages de travail clairement signalées, à remplacer par les textes validés. Aucune promesse de conformité juridique automatique.
 - **SEO** : `SITE_INDEXABLE=false` par défaut. Définir le domaine canonique `SITE_URL`, valider les textes et activer l’indexation uniquement sur la production approuvée.
 
 ## Architecture
 
-| Couche              | Implémentation                                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| Site public         | Next.js App Router, React, TypeScript                                                    |
-| Styles / animations | CSS structuré, SVG, IntersectionObserver ; pas de moteur 3D                              |
-| Gestion éditoriale  | Sanity Studio séparé, API publique en lecture seule, perspective `published`             |
-| Contact             | `POST /api/contact` → SMTP Gmail ou API Resend, texte brut, réponse adressée au visiteur |
-| Données prospects   | Aucun CRM, aucune base de leads, pas de journal applicatif du formulaire                 |
-| Tests               | Node/tsx, Playwright et axe-core                                                         |
+| Couche              | Implémentation                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| Site public         | Next.js App Router, React, TypeScript                                                           |
+| Styles / animations | CSS structuré, SVG, IntersectionObserver ; pas de moteur 3D                                     |
+| Gestion éditoriale  | Sanity Studio séparé, API publique en lecture seule, perspective `published`                    |
+| Contact             | `POST /api/contact` → SMTP Gmail ou API Resend, HTML/texte, Reply-To visiteur, accusé optionnel |
+| Données prospects   | Aucun CRM, aucune base de leads, logs de statut sans contenu ni coordonnées                     |
+| Tests               | Node/tsx, Playwright et axe-core                                                                |
 
 `src/lib/content.ts` centralise l’accès CMS et le contenu de secours. Les brouillons Sanity, les documents dont le statut n’est pas publié et les articles datés dans le futur sont exclus des requêtes publiques. Cache : 60 secondes lorsqu’un CMS est configuré. Aucun jeton d’administration n’est nécessaire dans le site public.
 
 ## Documentation
 
 - [Activation des e-mails Gmail](docs/EMAIL-GMAIL.md)
+- [Recette de l’intégration contact Gmail](docs/RECETTE-CONTACT-GMAIL.md)
 - [Administration et publication](docs/ADMINISTRATION.md)
 - [Déploiement, sécurité, sauvegarde et reprise](docs/EXPLOITATION.md)
 - [Périmètre, services tiers et coûts à confirmer](docs/CADRAGE.md)

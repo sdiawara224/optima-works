@@ -64,3 +64,11 @@ test('le build depuis un ZIP sans .git vérifie aussi les exemples sans divulgat
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('refuse aussi les secrets SMTP et Turnstile dans les exemples', () => {
+  for (const key of ['SMTP_PASSWORD', 'TURNSTILE_SECRET_KEY']) {
+    const findings = inspectFile('.env.example', `${key}=test-only-value`);
+    assert.equal(findings.length, 1);
+    assert.ok(!JSON.stringify(findings).includes('test-only-value'));
+  }
+});

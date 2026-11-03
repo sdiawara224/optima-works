@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, CheckCircle2, LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { contactSchema, serviceNames } from '@/lib/contact';
+import { ContactChallenge } from './contact-challenge';
+import {
+  descriptionFileError,
+  DESCRIPTION_FILE_ACCEPT,
+  DESCRIPTION_FILE_HINT,
+} from '@/lib/contact-file';
 
 export function ContactForm({
   enabled,
@@ -19,7 +25,12 @@ export function ContactForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [state, setState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [reference, setReference] = useState('');
   const form = useRef<HTMLFormElement>(null);
+  const inFlight = useRef(false);
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [challengeVersion, setChallengeVersion] = useState(0);
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('service');
     if (value && serviceNames.includes(value as (typeof serviceNames)[number])) {
@@ -44,9 +55,14 @@ export function ContactForm({
       noValidate
       onSubmit={async (e) => {
         e.preventDefault();
-        if (state === 'loading') return;
-        const data = Object.fromEntries(new FormData(e.currentTarget));
-        const parsed = contactSchema.safeParse({ ...data, consent: data.consent === 'on' });
+        if (inFlight.current || state === 'success') return;
+        const submitted = new FormData(e.currentTarget);
+        const data = Object.fromEntries(submitted);
+        const parsed = contactSchema.safeParse({
+          ...data,
+          consent: data.consent === 'on',
+          turnstileToken,
+        });
         if (!parsed.success) {
           const fieldErrors: Record<string, string> = {};
           parsed.error.issues.forEach((i) => {
@@ -59,28 +75,58 @@ export function ContactForm({
           );
           return;
         }
+        const selectedFile = submitted.get('descriptionFile');
+        const attachment =
+          selectedFile instanceof File && selectedFile.name ? selectedFile : undefined;
+        const fileError = attachment ? descriptionFileError(attachment) : null;
+        if (fileError) {
+          setErrors({ descriptionFile: fileError });
+          setState('idle');
+          requestAnimationFrame(() =>
+            form.current?.querySelector<HTMLInputElement>('[name="descriptionFile"]')?.focus(),
+          );
+          return;
+        }
         setErrors({});
+        if (siteKey && !turnstileToken) {
+          setState('error');
+          setMessage('Veuillez compléter la vérification anti-spam avant l’envoi.');
+          return;
+        }
+        inFlight.current = true;
+        setErrors({});
+        setMessage('');
+        setReference('');
         setState('loading');
+        let failureMessage = "Une erreur est survenue lors de l'envoi. Veuillez réessayer.";
         try {
+          const payload = new FormData();
+          for (const [name, value] of Object.entries(parsed.data))
+            payload.append(name, String(value));
+          if (attachment) payload.append('descriptionFile', attachment);
           const res = await fetch('/api/contact', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(parsed.data),
+            // Keep JSON compatibility without a file; the browser sets the multipart boundary when needed.
+            ...(attachment ? {} : { headers: { 'Content-Type': 'application/json' } }),
+            body: attachment ? payload : JSON.stringify(parsed.data),
           });
           const result = await res.json();
           if (!res.ok) {
             if (result.errors) setErrors(result.errors);
-            throw new Error(result.message || 'L’envoi a échoué. Veuillez réessayer.');
+            if (typeof result.requestId === 'string' && /^[a-f0-9-]{36}$/i.test(result.requestId))
+              setReference(result.requestId);
+            if (typeof result.message === 'string') failureMessage = result.message;
+            throw new Error('Contact request rejected');
           }
           setState('success');
           form.current?.reset();
-        } catch (err) {
+        } catch {
           setState('error');
-          setMessage(
-            err instanceof Error
-              ? err.message
-              : 'La connexion a été interrompue. Veuillez réessayer.',
-          );
+          setMessage(failureMessage);
+        } finally {
+          inFlight.current = false;
+          setTurnstileToken('');
+          setChallengeVersion((value) => value + 1);
         }
       }}
     >
@@ -187,6 +233,24 @@ export function ContactForm({
         <span className="field-hint">Entre 20 et 5 000 caractères.</span>
         {error('message')}
       </label>
+      <label>
+        Fichier de description
+        <input
+          name="descriptionFile"
+          type="file"
+          accept={DESCRIPTION_FILE_ACCEPT}
+          {...attrs('descriptionFile')}
+          aria-describedby={
+            errors.descriptionFile
+              ? 'description-file-hint error-descriptionFile'
+              : 'description-file-hint'
+          }
+        />
+        <span className="field-hint" id="description-file-hint">
+          {DESCRIPTION_FILE_HINT}
+        </span>
+        {error('descriptionFile')}
+      </label>
       <div className="honeypot" aria-hidden="true">
         <label>
           Ne pas remplir
@@ -201,6 +265,13 @@ export function ContactForm({
         </span>
       </label>
       {error('consent')}
+      {siteKey && (
+        <ContactChallenge
+          siteKey={siteKey}
+          resetKey={challengeVersion}
+          onToken={setTurnstileToken}
+        />
+      )}
       <button
         className="button form-submit"
         type="submit"
@@ -208,7 +279,7 @@ export function ContactForm({
       >
         {state === 'loading' ? (
           <>
-            Envoi en cours <LoaderCircle className="spin" size={18} />
+            Envoi en cours... <LoaderCircle className="spin" size={18} />
           </>
         ) : state === 'success' ? (
           <>
@@ -216,19 +287,20 @@ export function ContactForm({
           </>
         ) : (
           <>
-            Envoyer ma demande <ArrowUpRight size={19} />
+            Envoyer le message <ArrowUpRight size={19} />
           </>
         )}
       </button>
       <div aria-live="polite" aria-atomic="true">
         {state === 'success' && (
           <p className="success-message">
-            Votre demande a bien été envoyée. Merci de nous avoir présenté votre projet !
+            Votre message a bien été envoyé. Nous vous répondrons dans les meilleurs délais.
           </p>
         )}
         {state === 'error' && (
           <div className="error-message" role="alert">
             <p>{message}</p>
+            {reference && <p>Référence de suivi : {reference}</p>}
             {whatsapp ? (
               <a href={whatsapp} target="_blank" rel="noreferrer">
                 Contactez-nous sur WhatsApp ↗

@@ -36,7 +36,7 @@ test('la FAQ fonctionne au clavier', async ({ page }) => {
 });
 test('le formulaire signale les champs invalides et un envoi non configuré', async ({ page }) => {
   await page.goto('/#contact');
-  await page.getByRole('button', { name: 'Envoyer ma demande' }).click();
+  await page.getByRole('button', { name: 'Envoyer le message' }).click();
   await expect(page.getByRole('textbox', { name: 'Nom et prénom' })).toBeFocused();
   await expect(page.getByText('Indiquez au moins 2 caractères.')).toBeVisible();
   await page.getByRole('textbox', { name: 'Nom et prénom' }).fill('Mamadou Diallo');
@@ -47,9 +47,9 @@ test('le formulaire signale les champs invalides et un envoi non configuré', as
     .getByRole('textbox', { name: 'Votre projet, vos idées' })
     .fill('Je souhaite créer une identité visuelle pour mon activité.');
   await page.locator('[name="consent"]').check();
-  await page.getByRole('button', { name: 'Envoyer ma demande' }).click();
+  await page.getByRole('button', { name: 'Envoyer le message' }).click();
   await expect(page.locator('.error-message')).toContainText('Aucun message n’a été transmis');
-  await expect(page.getByText('Votre demande a bien été envoyée')).toHaveCount(0);
+  await expect(page.getByText('Votre message a bien été envoyé')).toHaveCount(0);
   await expect(
     page
       .locator('.error-message')

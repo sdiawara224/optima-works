@@ -1,6 +1,8 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
+import nodemailer from 'nodemailer';
+import { contactSchema } from '../src/lib/contact';
 import assert from 'node:assert/strict';
-import { getMailConfiguration } from '../src/lib/mail';
+import { getMailConfiguration, sendContactEmail } from '../src/lib/mail';
 import { OFFICIAL_CONTACT_EMAIL } from '../src/lib/site-config';
 
 test('Gmail cible par défaut le compte officiel et ne nécessite aucun domaine', () => {
@@ -58,4 +60,123 @@ test('conserve la compatibilité Resend sans exposer les secrets au navigateur',
   });
   assert.equal(config?.provider, 'resend');
   assert.equal(config?.to, OFFICIAL_CONTACT_EMAIL);
+});
+
+test('les nouvelles variables SMTP sont prises en charge et prioritaires sur les alias', () => {
+  assert.deepEqual(
+    getMailConfiguration({
+      SMTP_HOST: 'smtp.gmail.com',
+      SMTP_PORT: '465',
+      SMTP_USER: 'optimaworksgn@gmail.com',
+      SMTP_PASSWORD: 'abcd efgh ijkl mnop',
+      CONTACT_EMAIL: 'optimaworksgn@gmail.com',
+      GMAIL_APP_PASSWORD: 'legacy-test-only',
+      CONTACT_TO: 'legacy@example.com',
+    }),
+    {
+      provider: 'gmail',
+      user: OFFICIAL_CONTACT_EMAIL,
+      password: 'abcdefghijklmnop',
+      to: OFFICIAL_CONTACT_EMAIL,
+    },
+  );
+});
+test('refuse un hôte ou port SMTP différent et les injections dans la configuration', () => {
+  for (const overrides of [
+    { SMTP_HOST: 'untrusted.example' },
+    { SMTP_PORT: '587' },
+    { SMTP_USER: 'test@example.com\r\nBcc: other@example.com' },
+    { CONTACT_EMAIL: 'test@example.com\r\nBcc: other@example.com' },
+  ])
+    assert.equal(getMailConfiguration({ SMTP_PASSWORD: 'test-only', ...overrides }), null);
+});
+test('une variable SMTP_PASSWORD explicitement vide ne réactive pas un ancien secret', () => {
+  assert.equal(
+    getMailConfiguration({ SMTP_PASSWORD: '', GMAIL_APP_PASSWORD: 'legacy-test-only' }),
+    null,
+  );
+});
+
+test('le délai SMTP total ferme le transport et refuse le faux succès', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  let closed = false;
+  const transport = mock.method(
+    nodemailer,
+    'createTransport',
+    () =>
+      ({
+        sendMail: () => new Promise(() => {}),
+        close: () => {
+          closed = true;
+        },
+      }) as unknown as ReturnType<typeof nodemailer.createTransport>,
+  );
+  try {
+    const data = contactSchema.parse({
+      name: 'Mamadou Diallo',
+      email: 'test@example.com',
+      service: 'Graphisme & Design',
+      subject: 'Test SMTP',
+      message: 'Un message suffisamment long pour le test.',
+      consent: true,
+    });
+    const sending = sendContactEmail(data, {
+      provider: 'gmail',
+      user: OFFICIAL_CONTACT_EMAIL,
+      password: 'test-only',
+      to: OFFICIAL_CONTACT_EMAIL,
+    });
+    const rejected = assert.rejects(sending, /deadline exceeded/);
+    context.mock.timers.tick(20_000);
+    await rejected;
+    assert.equal(closed, true);
+  } finally {
+    transport.mock.restore();
+    context.mock.timers.reset();
+  }
+});
+
+test('l’alternative Resend conserve la pièce jointe encodée sans chemin ou URL', async () => {
+  const data = contactSchema.parse({
+    name: 'Mamadou Diallo',
+    email: 'test@example.com',
+    service: 'Graphisme & Design',
+    subject: 'Test fichier',
+    message: 'Un message suffisamment long pour ce test.',
+    consent: true,
+  });
+  const content = Buffer.from('Description jointe au projet.');
+  const fetchStub = mock.method(global, 'fetch', async (url: unknown, init?: RequestInit) => {
+    assert.equal(url, 'https://api.resend.com/emails');
+    const sent = JSON.parse(init!.body as string);
+    assert.deepEqual(sent.attachments, [
+      {
+        filename: 'description.txt',
+        content: content.toString('base64'),
+        content_type: 'text/plain',
+      },
+    ]);
+    assert.deepEqual(sent.to, ['optimaworksgn@gmail.com']);
+    assert.equal(sent.reply_to, 'test@example.com');
+    return Response.json({ id: 'test-only-confirmation' });
+  });
+  try {
+    await sendContactEmail(
+      data,
+      {
+        provider: 'resend',
+        apiKey: 'test-only',
+        from: 'test@example.com',
+        to: 'optimaworksgn@gmail.com',
+      },
+      {
+        filename: 'description.txt',
+        content,
+        contentType: 'text/plain',
+        contentDisposition: 'attachment',
+      },
+    );
+  } finally {
+    fetchStub.mock.restore();
+  }
 });

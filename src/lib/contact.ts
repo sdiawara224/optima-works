@@ -15,7 +15,23 @@ export const contactSchema = z.object({
     .max(100, '100 caractères maximum.')
     .regex(/^[\p{L}\p{M}\s.'’-]+$/u, 'Utilisez des lettres, espaces, apostrophes ou tirets.'),
   company: z.string().trim().max(150, '150 caractères maximum.').optional().default(''),
-  email: z.string().trim().max(254).email('Indiquez une adresse e-mail valide.'),
+  email: z
+    .string()
+    .trim()
+    .max(254)
+    .email('Indiquez une adresse e-mail valide.')
+    .refine((value) => {
+      const [local, domain] = value.split('@');
+      // Gmail usernames cannot contain underscores/hyphens. Preserve valid +tags.
+      return (
+        !['gmail.com', 'googlemail.com'].includes(domain?.toLowerCase()) ||
+        /^[a-z0-9]+(?:\.[a-z0-9]+)*$/i.test(local.split('+')[0])
+      );
+    }, 'Cette adresse Gmail n’est pas conforme. Vérifiez les caractères avant @gmail.com.')
+    .transform((value) => {
+      const [local, domain] = value.split('@');
+      return `${local}@${domain.toLowerCase()}`;
+    }),
   phone: z
     .string()
     .trim()
@@ -28,7 +44,8 @@ export const contactSchema = z.object({
     .string()
     .trim()
     .min(3, 'Précisez un objet (3 caractères minimum).')
-    .max(150, '150 caractères maximum.'),
+    .max(150, '150 caractères maximum.')
+    .regex(/^[^\r\n\u0000-\u001f\u007f]*$/, 'L’objet doit tenir sur une ligne.'),
   message: z
     .string()
     .trim()
@@ -38,6 +55,7 @@ export const contactSchema = z.object({
     error: 'Veuillez prendre connaissance de la politique de confidentialité.',
   }),
   website: z.string().max(200).optional().default(''),
+  turnstileToken: z.string().max(2048).optional().default(''),
 });
 export type ContactData = z.infer<typeof contactSchema>;
 
