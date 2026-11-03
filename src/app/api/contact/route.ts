@@ -3,6 +3,7 @@ import { contactSchema } from '@/lib/contact';
 import { getMailConfiguration, sendContactEmail, sendContactAcknowledgement } from '@/lib/mail';
 import { createHash, randomUUID } from 'node:crypto';
 import { verifyContactChallenge } from '@/lib/turnstile';
+import { mailFailureCategory, type MailFailureCategory } from '@/lib/mail-diagnostics';
 import { MAX_DESCRIPTION_FILE_BYTES } from '@/lib/contact-file';
 import {
   readDescriptionAttachment,
@@ -13,9 +14,17 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function audit(requestId: string, event: string, provider?: string) {
+function audit(requestId: string, event: string, provider?: string, failure?: MailFailureCategory) {
   // Only operational metadata. No IP, message, recipient, token, credentials or SMTP response.
-  console.info(JSON.stringify({ timestamp: new Date().toISOString(), requestId, event, provider }));
+  console.info(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      requestId,
+      event,
+      provider,
+      ...(failure ? { failure } : {}),
+    }),
+  );
 }
 const windows = new Map<string, { count: number; expires: number }>();
 const MAX_TEXT_BYTES = 24_000;
@@ -163,9 +172,9 @@ export async function POST(request: NextRequest) {
     return fail('L’envoi par e-mail n’est pas encore activé. Aucun message n’a été transmis.', 503);
   try {
     await sendContactEmail(result.data, config, attachment);
-  } catch {
-    audit(requestId, 'primary_failed', config.provider);
-    return fail("Une erreur est survenue lors de l'envoi. Veuillez réessayer.", 502);
+  } catch (error) {
+    audit(requestId, 'primary_failed', config.provider, mailFailureCategory(error));
+    return fail("Une erreur est survenue lors de l'envoi. Veuillez réessayer.", 502, { requestId });
   }
   audit(requestId, 'primary_accepted', config.provider);
   let acknowledgement: 'sent' | 'failed' | 'disabled' = 'disabled';
@@ -174,10 +183,10 @@ export async function POST(request: NextRequest) {
       await sendContactAcknowledgement(result.data, config);
       acknowledgement = 'sent';
       audit(requestId, 'acknowledgement_accepted', config.provider);
-    } catch {
+    } catch (error) {
       // The primary request already succeeded. Never invite the visitor to submit it again.
       acknowledgement = 'failed';
-      audit(requestId, 'acknowledgement_failed', config.provider);
+      audit(requestId, 'acknowledgement_failed', config.provider, mailFailureCategory(error));
     }
   }
   return NextResponse.json(

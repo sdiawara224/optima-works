@@ -232,3 +232,23 @@ test('le vrai serveur Next.js traite le multipart et refuse un faux PDF', async 
   expect(invalid.status()).toBe(400);
   expect((await invalid.json()).errors.descriptionFile).toContain('PDF');
 });
+
+test('une erreur affiche uniquement la référence de suivi, pas les diagnostics SMTP', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const id = '12345678-abcd-1234-abcd-123456789abc';
+  await page.route('**/api/contact', (route) =>
+    route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Envoi indisponible.', requestId: id }),
+    }),
+  );
+  await fillContact(page);
+  await page.getByRole('button', { name: 'Envoyer le message' }).click();
+  await expect(page.locator('.error-message')).toContainText(`Référence de suivi : ${id}`);
+  await expect(page.locator('.error-message')).not.toContainText('SMTP');
+  await expect(page.getByRole('textbox', { name: 'Nom et prénom' })).toHaveValue('Mamadou Diallo');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

@@ -277,7 +277,12 @@ for (const scenario of ['success', 'primary-failure', 'ack-failure'] as const) {
         const item = JSON.parse(line);
         assert.ok(!Number.isNaN(Date.parse(item.timestamp)));
         assert.ok(item.requestId);
-        assert.deepEqual(Object.keys(item).sort(), ['event', 'provider', 'requestId', 'timestamp']);
+        assert.deepEqual(
+          Object.keys(item).sort(),
+          item.event.endsWith('_failed')
+            ? ['event', 'failure', 'provider', 'requestId', 'timestamp']
+            : ['event', 'provider', 'requestId', 'timestamp'],
+        );
       }
     } finally {
       transport.mock.restore();
@@ -537,5 +542,44 @@ test('n’envoie jamais la pièce jointe dans l’accusé et ne journalise pas s
     verification.mock.restore();
     log.mock.restore();
     configureGmail();
+  }
+});
+
+test('un refus Gmail est identifiable uniquement dans le log sûr, avec référence corrélable', async () => {
+  configureGmail();
+  const logs: string[] = [];
+  const log = mock.method(console, 'info', (line: string) => {
+    logs.push(line);
+  });
+  const transport = mock.method(
+    nodemailer,
+    'createTransport',
+    () =>
+      ({
+        sendMail: async () => {
+          throw Object.assign(new Error('private account and password details'), {
+            code: 'EAUTH',
+            response: 'private provider response',
+          });
+        },
+        close() {},
+      }) as unknown as ReturnType<typeof nodemailer.createTransport>,
+  );
+  try {
+    const response = await POST(request());
+    assert.equal(response.status, 502);
+    const body = await response.json();
+    assert.match(body.requestId, /^[a-f0-9-]{36}$/i);
+    assert.equal(body.failure, undefined);
+    assert.ok(!JSON.stringify(body).includes('EAUTH'));
+    assert.ok(!JSON.stringify(body).includes('private'));
+    assert.equal(logs.length, 1);
+    const entry = JSON.parse(logs[0]);
+    assert.equal(entry.failure, 'SMTP_AUTH_REJECTED');
+    assert.equal(entry.requestId, body.requestId);
+    for (const value of ['private', valid.email, 'test-only']) assert.ok(!logs[0].includes(value));
+  } finally {
+    transport.mock.restore();
+    log.mock.restore();
   }
 });

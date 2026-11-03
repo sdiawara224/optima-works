@@ -119,14 +119,20 @@ async function deliver(config: MailConfiguration, message: Message): Promise<voi
           ...message,
         }),
         new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error('SMTP deadline exceeded')), 20_000);
+          deadline = setTimeout(
+            () =>
+              reject(Object.assign(new Error('SMTP deadline exceeded'), { code: 'SMTP_DEADLINE' })),
+            20_000,
+          );
         }),
       ]);
       const accepted = result.accepted?.some(
         (address) => address.toLowerCase() === message.to.toLowerCase(),
       );
       if (!accepted || result.rejected?.length || !/^250\b/.test(result.response ?? '')) {
-        throw new Error('SMTP delivery was not accepted');
+        throw Object.assign(new Error('SMTP delivery was not accepted'), {
+          code: 'SMTP_NOT_ACCEPTED',
+        });
       }
     } finally {
       clearTimeout(deadline);

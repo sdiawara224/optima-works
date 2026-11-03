@@ -25,6 +25,7 @@ export function ContactForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [state, setState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [reference, setReference] = useState('');
   const form = useRef<HTMLFormElement>(null);
   const inFlight = useRef(false);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -95,6 +96,7 @@ export function ContactForm({
         inFlight.current = true;
         setErrors({});
         setMessage('');
+        setReference('');
         setState('loading');
         let failureMessage = "Une erreur est survenue lors de l'envoi. Veuillez réessayer.";
         try {
@@ -111,6 +113,8 @@ export function ContactForm({
           const result = await res.json();
           if (!res.ok) {
             if (result.errors) setErrors(result.errors);
+            if (typeof result.requestId === 'string' && /^[a-f0-9-]{36}$/i.test(result.requestId))
+              setReference(result.requestId);
             if (typeof result.message === 'string') failureMessage = result.message;
             throw new Error('Contact request rejected');
           }
@@ -296,6 +300,7 @@ export function ContactForm({
         {state === 'error' && (
           <div className="error-message" role="alert">
             <p>{message}</p>
+            {reference && <p>Référence de suivi : {reference}</p>}
             {whatsapp ? (
               <a href={whatsapp} target="_blank" rel="noreferrer">
                 Contactez-nous sur WhatsApp ↗
